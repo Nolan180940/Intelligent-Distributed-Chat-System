@@ -322,6 +322,12 @@ class GUIChatClient:
             
             # Store in history for summary
             self.chat_history.append(f"{sender}: {content}")
+
+            # Treat bot-formatted messages as bot output for all clients.
+            # This keeps the bot bubble style while still using normal server broadcast.
+            if content.startswith("🤖 Bot:"):
+                self._display_message(f"{sender} {content}", tag='bot')
+                return
             
             # Analyze sentiment and display with emoji
             sentiment = self.sentiment_analyzer.analyze(content)
@@ -399,6 +405,10 @@ class GUIChatClient:
             # Add bot response to history
             bot_entry = f"🤖 Bot: {response}"
             self.chat_history.append(bot_entry)
+
+            # Broadcast bot response through server so every client can see it.
+            if self.connected and self.client:
+                self.client.send_message(bot_entry, broadcast=True)
             
             # Queue display in main thread
             self.gui_queue.put({
