@@ -209,6 +209,16 @@ class XChatClient:
                                fg=T["muted"], bg=T["topbar"])
         self._bstat.pack(side="right", padx=(0, 8), pady=10)
 
+        self._copy_btn = tk.Button(tb, text="📋", font=("Segoe UI", 13), bg=T["topbar"], fg=T["muted"],
+                                   relief="flat", bd=0, activebackground=T["topbar"],
+                                   command=self._copy_address)
+        self._copy_btn.pack(side="right", padx=(0, 2), pady=6)
+
+        self._ngrok_btn = tk.Button(tb, text="🌍", font=("Segoe UI", 13), bg=T["topbar"], fg=T["muted"],
+                                    relief="flat", bd=0, activebackground=T["topbar"],
+                                    command=self._start_ngrok)
+        # Hidden until Host mode connected
+
         tk.Button(tb, text="⚙", font=("Segoe UI", 13), bg=T["topbar"], fg=T["muted"],
                   relief="flat", bd=0, activebackground=T["topbar"],
                   command=self._settings).pack(side="right", padx=(0, 2), pady=6)
@@ -290,6 +300,191 @@ class XChatClient:
         reset_bot(); self.bot = get_bot(persona=self.persona)
         self._update_bot()
         self._sysmsg(f"👋 Welcome, {self.username}! ({mode_label})")
+
+        if self.mode == "host":
+            self._ngrok_btn.pack(side="right", padx=(0, 2), pady=6, before=self._copy_btn)
+            self._show_connection_info()
+
+    # ── Connection Info ─────────────────────────────────
+    def _get_local_ip(self):
+        """Get the best local IP — prefer Wi-Fi (192.168.x.x) over campus/VPN."""
+        import netifaces
+        try:
+            # Try to pick 192.168.x.x first (home Wi-Fi)
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface)
+                for addr in addrs.get(netifaces.AF_INET, []):
+                    ip = addr['addr']
+                    if ip.startswith('192.168.'):
+                        return ip
+            # Fallback: any private IP
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface)
+                for addr in addrs.get(netifaces.AF_INET, []):
+                    ip = addr['addr']
+                    if ip.startswith(('10.', '172.')):
+                        return ip
+        except:
+            pass
+        # Last resort
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "127.0.0.1"
+
+    def _check_ngrok(self):
+        """Check if ngrok tunnel is running and get public address."""
+        try:
+            r = subprocess.run(["ngrok", "tcp", str(self.port)], capture_output=True,
+                             text=True, timeout=2, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0)
+        except:
+            pass
+        try:
+            import urllib.request
+            resp = urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=1)
+            data = json.loads(resp.read())
+            for t in data.get("tunnels", []):
+                pub = t.get("public_url", "")
+                if pub.startswith("tcp://"):
+                    return pub.replace("tcp://", "")
+            return None
+        except:
+            return None
+
+    def _show_connection_info(self):
+        local_ip = self._get_local_ip()
+        self._sysmsg(f"📋 Local: {local_ip}:{self.port}")
+        self._sysmsg("💡 Click 🌍 to start cpolar for remote access")
+
+    def _start_ngrok(self):
+        """Try cpolar first, then ngrok, then playit.gg."""
+        # Kill any existing tunnel processes to avoid duplicates
+        for proc in ["cpolar.exe", "ngrok.exe", "playit.exe"]:
+            try: subprocess.run(["taskkill", "/F", "/IM", proc], capture_output=True)
+            except: pass
+
+        # ── Try cpolar ──
+        for cp in [r"D:\Tools\Cpolar\cpolar.exe", r"C:\cpolar\cpolar.exe"]:
+            if os.path.exists(cp):
+                try:
+                    self._sysmsg("🌍 Starting cpolar tunnel...")
+                    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+                    proc = subprocess.Popen(
+                        [cp, "tcp", str(self.port), "-log", "stdout", "-log-level", "INFO"],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, **kwargs
+                    )
+                    # Read stdout to extract tunnel URL
+                    def _read_cpolar():
+                        import re
+                        for line in iter(proc.stdout.readline, ''):
+                            m = re.search(r'tcp://([\w.-]+:\d+)', line)
+                            if m:
+                                self._sysmsg(f"🌍 Public: {m.group(1)}")
+                                return
+                        self._sysmsg("⚠️  cpolar started. Address at http://127.0.0.1:4042")
+                    threading.Thread(target=_read_cpolar, daemon=True).start()
+                    return
+                except Exception as e:
+                    self._sysmsg(f"cpolar failed: {e}")
+
+        # ── Try ngrok ──
+        for ngrok_path in [r"D:\ngrok\ngrok.exe", r"C:\ngrok\ngrok.exe", "ngrok"]:
+            if os.path.exists(ngrok_path) or ngrok_path == "ngrok":
+                try:
+                    self._sysmsg("🌍 Trying ngrok...")
+                    kwargs = {}
+                    if sys.platform == "win32":
+                        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                    subprocess.Popen([ngrok_path, "tcp", str(self.port)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+                    self._poll_tunnel("ngrok")
+                    return
+                except:
+                    pass
+
+        # ── Try playit.gg ──
+        for playit_path in [r"D:\ngrok\playit.exe", r"C:\ngrok\playit.exe"]:
+            if os.path.exists(playit_path):
+                try:
+                    self._sysmsg("🌍 Trying playit.gg...")
+                    subprocess.Popen([playit_path],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0)
+                    self._poll_tunnel("playit")
+                    return
+                except:
+                    pass
+
+        self._sysmsg("❌ No tunnel tool found (cpolar/ngrok/playit)")
+
+    def _poll_tunnel(self, tool):
+        """Poll for tunnel public address."""
+        def _poll():
+            for _ in range(8):
+                time.sleep(2)
+                if tool == "cpolar":
+                    addr = self._check_cpolar()
+                elif tool == "ngrok":
+                    addr = self._check_ngrok()
+                else:
+                    addr = self._check_playit()
+                if addr:
+                    self._sysmsg(f"🌍 Public: {addr}")
+                    return
+            self._sysmsg(f"⚠️  {tool} running but tunnel not found. Check {tool} window.")
+        threading.Thread(target=_poll, daemon=True).start()
+
+    def _check_cpolar(self):
+        """Check cpolar API for public address (web UI at localhost:4042)."""
+        try:
+            import urllib.request
+            resp = urllib.request.urlopen("http://127.0.0.1:4042/api/tunnels", timeout=2)
+            data = json.loads(resp.read())
+            for t in data.get("tunnels", []):
+                pub = t.get("public_url", "")
+                if pub.startswith("tcp://"):
+                    return pub.replace("tcp://", "")
+            return None
+        except:
+            return None
+
+    def _check_playit(self):
+        """Check playit.gg for public address."""
+        try:
+            # playit agent listens on localhost:22222 for status
+            import urllib.request
+            resp = urllib.request.urlopen("http://127.0.0.1:22222/api/tunnels", timeout=2)
+            data = json.loads(resp.read())
+            for t in data if isinstance(data, list) else data.get("tunnels", []):
+                if t.get("status") == "online" and t.get("tunnel_type") == "tcp":
+                    host = t.get("tunnel_ip", t.get("host", ""))
+                    port = t.get("tunnel_port", t.get("port", ""))
+                    if host and port:
+                        return f"{host}:{port}"
+            return None
+        except:
+            return None
+
+    def _copy_address(self):
+        """Copy best connection address to clipboard."""
+        local_ip = self._get_local_ip()
+        text = f"{local_ip}:{self.port}"
+
+        # Check running tunnels (cpolar > ngrok > playit)
+        for check in [self._check_cpolar, self._check_ngrok, self._check_playit]:
+            addr = check()
+            if addr:
+                text = addr
+                break
+
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self._sysmsg(f"📋 Copied: {text}")
 
     def _on_disc(self):
         self.connected = False
