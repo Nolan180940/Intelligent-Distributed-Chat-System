@@ -1,39 +1,14 @@
-# ICDS Final Project: Intelligent Distributed Chat System
+# Intelligent Distributed Chat System
 
 ## 📌 Project Overview
 
-本项目是一个基于 Python Socket 和 Tkinter GUI 的分布式智能聊天系统，专为 NYU Shanghai ICS 期末课程设计。系统实现了实时双向消息显示、AI 机器人集成（支持 Ollama phi3:mini 模型）、情感分析、聊天摘要和 AI 绘图等核心功能。通过模块化设计和线程安全的消息处理机制，确保了 GUI 界面流畅不卡顿，同时提供了完整的 Bonus 功能支持。
+本项目是一个基于 Python Socket 和 Tkinter GUI 的分布式智能聊天系统。系统实现了实时双向消息显示、AI 机器人集成（支持 Ollama phi3:mini 模型）、情感分析、聊天摘要和 AI 绘图等核心功能。通过模块化设计和线程安全的消息处理机制，确保了 GUI 界面流畅不卡顿，同时提供了完整的 Bonus 功能支持。
 
 **技术栈：** Python 3.8+、Tkinter、Socket、Threading、Ollama API、TextBlob
 
 **解决的问题：** 传统命令行聊天工具缺乏友好的图形界面和智能化交互体验，本项目通过集成 AI 机器人和情感分析，提供更智能、更人性化的聊天体验。
 
----
 
-## ✨ Features Implemented
-
-### 🔹 Compulsory: GUI (50%)
-- [x] Real-time bidirectional message display (sent/received)
-- [x] Login dialog with username validation
-- [x] Emoji support via button click
-- [x] Fixed: `self.system_msg` reset bug (prevents duplicate messages)
-- [x] Thread-safe message receiving (non-blocking GUI)
-
-### 🔹 Selective Topic: Chatbot (20%)
-- [x] One-on-one conversation with Ollama (phi3:mini)
-- [x] Context-aware responses (maintains message history)
-- [x] Customizable personality via system prompt
-- [x] GUI integration: purple bubble + 🤖 icon for bot messages
-
-### 🔹 Bonus Features (35% Target)
-| Feature | Points | Status |
-|---------|--------|--------|
-| Group chat @Bot interaction | 5% | ✅ Implemented |
-| Sentiment analysis (TextBlob) | 10% | ✅ Implemented |
-| Chat summary (/summary command) | 10% | ✅ Implemented |
-| AI image generation (/aipic) | 10% | ✅ Simulated (fallback ready) |
-
----
 
 ## 🚀 Quick Start
 
@@ -71,7 +46,7 @@ python client/gui_client.py
 # Alice sends "Hello" → Bob sees it → Bob replies → Alice sees reply
 ```
 
-### Testing Bonus Features
+### Testing Features
 
 ```bash
 # 1. Sentiment Analysis:
@@ -104,7 +79,7 @@ python client/gui_client.py
 ## 📁 Project Structure
 
 ```
-ICDS_PROJECT/
+Intelligent Distributed Chat System/
 ├── server/
 │   └── chat_server.py      # Socket server with group chat support
 ├── client/
@@ -123,21 +98,6 @@ ICDS_PROJECT/
 ├── test_all_features.py    # Automated test script
 └── README.md               # This file
 ```
-
----
-
-## 🎓 Course Requirement Compliance
-
-| Requirement | Implemented? | Location |
-|-------------|-------------|----------|
-| GUI bidirectional display | ✅ | `gui_client.py:_display_message()` |
-| Fixed `self.system_msg` bug | ✅ | `gui_client.py:_display_system()` line 437, 447 |
-| Chatbot context + personality | ✅ | `ai_bot.py:chat_with_context()` |
-| phi3:mini usage demonstration | ✅ | See presentation video |
-| Bonus: Group chat @Bot | ✅ | `gui_client.py:_should_bot_respond()` |
-| Bonus: Sentiment analysis | ✅ | `sentiment_analyzer.py` |
-| Bonus: Chat summary | ✅ | `summary_generator.py` |
-| Bonus: AI image generation | ✅ (simulated) | `ai_bot.py:_handle_image_generation()` |
 
 ---
 
@@ -185,29 +145,6 @@ OLLAMA_MODEL = "phi3:mini"      # AI model
 
 ---
 
-## 📝 Code Highlights
-
-### Bug Fix Location (Critical for Grading)
-
-File: `client/gui_client.py`, method `_display_system()`:
-
-```python
-def _display_system(self, text: str):
-    # ✅ BUG FIX: Explicitly clear system_msg before and after display
-    # This fixes the known bug where messages repeat
-    self.system_msg = ""  # Line 437
-    
-    def _insert():
-        self.chat_display.config(state='normal')
-        self.chat_display.insert(tk.END, f"\n{text}\n", 'system')
-        self.chat_display.config(state='disabled')
-        self.chat_display.see(tk.END)
-        
-        # ✅ BUG FIX: Reset system_msg after display
-        # This is the critical fix for the repeat message bug
-        self.system_msg = ""  # Line 447
-```
-
 ### Thread-Safe GUI Updates
 
 All GUI updates go through the main thread:
@@ -232,21 +169,12 @@ else:
 
 ---
 
-## 🤝 Member Contributions
-
-| Member | Contributions |
-|--------|---------------|
-| [Name 1] | GUI development, bug fixes |
-| [Name 2] | AI bot integration, Ollama setup |
-| [Name 3] | Bonus features (sentiment, summary) |
-| [Name 4] | Testing, documentation |
-
-*请团队成员填写各自贡献*
-
----
-
 ## 📄 License
 
 MIT License - For educational purposes only
 
-NYU Shanghai ICS Final Project © 2024
+---
+
+## Liability Waiver
+
+This project is for educational purposes only, we won't hold responsibility if anyone clones the repository and makes any updates on it.
