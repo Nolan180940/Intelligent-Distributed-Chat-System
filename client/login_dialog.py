@@ -24,11 +24,11 @@ class LoginDialog:
         self.dialog.resizable(False, False)
         self.dialog.protocol("WM_DELETE_WINDOW", self._cancel)
         self.dialog.configure(bg=T["bg"])
-        self.dialog.geometry("400x570")
+        self.dialog.geometry("400x620")
         self.dialog.attributes("-topmost", True)
         self.dialog.update_idletasks(); self.dialog.deiconify(); self.dialog.lift()
         sw, sh = self.dialog.winfo_screenwidth(), self.dialog.winfo_screenheight()
-        self.dialog.geometry(f"400x570+{(sw-400)//2}+{(sh-570)//2}")
+        self.dialog.geometry(f"400x620+{(sw-400)//2}+{(sh-620)//2}")
 
         if not self.owns_root:
             self.dialog.transient(parent)
@@ -116,7 +116,7 @@ class LoginDialog:
 
     def _on_mode(self):
         if self.mode_var.get() == "join":
-            self.join_frame.pack(fill="x", before=self.sl)
+            self.join_frame.pack(fill="x", before=self.ue, pady=(0, 6))
         else:
             self.join_frame.pack_forget()
 

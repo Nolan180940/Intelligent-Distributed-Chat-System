@@ -52,6 +52,7 @@ a = Analysis(
         'openai',
         'requests',
         'dotenv',
+        'netifaces',
     ],
     hookspath=[],
     hooksconfig={},
