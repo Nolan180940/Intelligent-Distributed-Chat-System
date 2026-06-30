@@ -1,30 +1,18 @@
-"""
-Main GUI Client for Distributed Intelligent Chat System.
+﻿"""
+XChat — Modern Distributed Chat Client
 
 Features:
-- Full duplex message display (sent/received) ✅
-- Bug fix: system_msg reset after display ✅
-- Real-time message reception via background thread ✅
-- Emoji support ✅
-- Login interface ✅
-- AI Bot integration with persona selection ✅
-- Sentiment analysis with emoji indicators ✅
-- Chat summary command (/summary) ✅
-- AI image generation command (/aipic) ✅
-- Group chat with @Bot trigger ✅
+- Auto-start local server (works in EXE and script mode)
+- Beautiful modern dark UI with Discord-inspired design
+- API Key settings panel (SiliconFlow)
+- Chat bubbles, Bot integration, sentiment analysis
 """
 
-import os
-import sys
+import os, sys, subprocess, socket, time, threading, queue, json
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, simpledialog
-import threading
-import queue
-import json
-import time
-from typing import Optional, Dict, List
+from tkinter import ttk, messagebox
+from typing import Optional, List
 
-# Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config.settings as cfg
@@ -34,633 +22,429 @@ from bot.ai_bot import AIBot, get_bot, reset_bot
 from bot.sentiment_analyzer import get_analyzer
 from bot.summary_generator import SummaryGenerator
 
+# ═══════════════════════════════════════════════════════
+#  THEME — Discord / Slack inspired dark palette
+# ═══════════════════════════════════════════════════════
+T = {
+    "bg":         "#1e1f22",
+    "sidebar":    "#2b2d31",
+    "topbar":     "#2b2d31",
+    "input_bg":   "#383a40",
+    "chat_bg":    "#1e1f22",
+    "bubble_me":  "#5865f2",
+    "bubble_you": "#3f4147",
+    "bubble_bot": "#8b5cf6",
+    "text":       "#dbdee1",
+    "muted":      "#949ba4",
+    "white":      "#ffffff",
+    "accent":     "#5865f2",
+    "accent_hov": "#4752c4",
+    "green":      "#23a55a",
+    "red":        "#f23f42",
+    "yellow":     "#f0b232",
+    "border":     "#3f4147",
+}
 
-class GUIChatClient:
-    """Main GUI chat client with all features."""
-    
-    def __init__(self, username: str, persona: str = "helpful"):
+
+class APISettingsDialog:
+    """Settings dialog for API key."""
+
+    def __init__(self, parent):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("API Settings")
+        self.dialog.geometry("460x340")
+        self.dialog.resizable(False, False)
+        self.dialog.configure(bg=T["sidebar"])
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        self._build()
+
+    def _build(self):
+        f = tk.Frame(self.dialog, bg=T["sidebar"], padx=24, pady=20)
+        f.pack(fill="both", expand=True)
+
+        tk.Label(f, text="🤖 AI Bot Settings", font=("Segoe UI", 13, "bold"),
+                 fg=T["text"], bg=T["sidebar"]).pack(anchor="w", pady=(0, 6))
+        tk.Label(f, text="Enter API key to enable Bot. Chat works without it.",
+                 font=("Segoe UI", 9), fg=T["muted"], bg=T["sidebar"]).pack(anchor="w", pady=(0, 14))
+
+        tk.Label(f, text="SiliconFlow API Key", font=("Segoe UI", 9),
+                 fg=T["muted"], bg=T["sidebar"]).pack(anchor="w")
+        kf = tk.Frame(f, bg=T["sidebar"]); kf.pack(fill="x", pady=(3, 10))
+
+        self.kv = tk.StringVar(value=os.getenv("SILICONFLOW_API_KEY", ""))
+        self.ke = tk.Entry(kf, textvariable=self.kv, show="•", font=("Segoe UI", 10),
+                           bg=T["input_bg"], fg=T["text"], insertbackground=T["text"],
+                           relief="flat", bd=8)
+        self.ke.pack(side="left", fill="x", expand=True)
+        self._showing = False
+        tk.Button(kf, text="👁", width=3, font=("Segoe UI", 9),
+                  bg=T["input_bg"], fg=T["muted"], relief="flat", bd=0,
+                  command=self._toggle).pack(side="right", padx=(4, 0))
+
+        tk.Label(f, text="Model", font=("Segoe UI", 9), fg=T["muted"], bg=T["sidebar"]).pack(anchor="w")
+        self.mv = tk.StringVar(value=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct"))
+        cb = ttk.Combobox(f, textvariable=self.mv, state="readonly", font=("Segoe UI", 10),
+                          values=["Qwen/Qwen2.5-7B-Instruct", "Qwen/Qwen2.5-14B-Instruct",
+                                  "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1"])
+        cb.pack(fill="x", pady=(3, 8))
+
+        self.st = tk.Label(f, text="", font=("Segoe UI", 9), bg=T["sidebar"])
+        self.st.pack(anchor="w", pady=(2, 14))
+
+        bf = tk.Frame(f, bg=T["sidebar"]); bf.pack(fill="x")
+        tk.Button(bf, text="Cancel", command=self.dialog.destroy, font=("Segoe UI", 10),
+                  bg=T["input_bg"], fg=T["text"], relief="flat", padx=16, pady=5).pack(side="right", padx=(6, 0))
+        tk.Button(bf, text="Save & Apply", command=self._save, font=("Segoe UI", 10, "bold"),
+                  bg=T["accent"], fg=T["white"], relief="flat", padx=16, pady=5).pack(side="right")
+
+        tk.Label(f, text="Get free key at cloud.siliconflow.cn", font=("Segoe UI", 8),
+                 fg=T["accent"], bg=T["sidebar"], cursor="hand2").pack(side="left", pady=(6, 0))
+
+    def _toggle(self):
+        self._showing = not self._showing
+        self.ke.config(show="" if self._showing else "•")
+
+    def _save(self):
+        k = self.kv.get().strip()
+        if k and k != "sk-your-siliconflow-key-here":
+            os.environ["SILICONFLOW_API_KEY"] = k
+            os.environ["SILICONFLOW_MODEL"] = self.mv.get()
+            self.st.config(text="✅ Saved! Bot will use SiliconFlow.", fg=T["green"])
+            self.dialog.after(1000, self.dialog.destroy)
+        else:
+            self.st.config(text="⚠️ Please enter a valid API key", fg=T["red"])
+
+
+# ═══════════════════════════════════════════════════════
+#  MAIN CHAT CLIENT
+# ═══════════════════════════════════════════════════════
+class XChatClient:
+    def __init__(self, username: str, persona: str = "helpful",
+                 mode: str = "host", host: str = "127.0.0.1", port: int = 1112):
         self.username = username
         self.persona = persona
-        
-        # Network client
+        self.mode = mode
+        self.host = host
+        self.port = port
         self.client: Optional[ChatClient] = None
         self.connected = False
-        
-        # Bot instance
         self.bot: Optional[AIBot] = None
-        self.bot_enabled = True
-        self.chat_history: List[str] = []  # For summary feature
-        
-        # Sentiment analyzer
-        self.sentiment_analyzer = get_analyzer()
-        
-        # Message queue for thread-safe GUI updates
+        self.chat_history: List[str] = []
+        self.analyzer = get_analyzer()
         self.gui_queue = queue.Queue()
-        
-        # === BUG FIX: Explicitly initialize system_msg to empty string ===
-        # This prevents the known bug where messages repeat because system_msg 
-        # was not reset after display
-        self.system_msg = ""
-        
-        # Initialize GUI
+
         self.root = tk.Tk()
-        self.root.title(f"ICDS Chat - {username}")
-        self.root.geometry("800x700")
-        self.root.minsize(600, 500)
-        
-        # Setup styles and UI
-        self._setup_styles()
-        self._setup_ui()
-        
-        # Connect to server
-        self._connect_to_server()
-        
-        # Start GUI update loop
-        self._start_gui_update_loop()
-        
-        # Handle window close
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-    
-    def _setup_styles(self):
-        """Configure message styles and colors."""
-        self.colors = {
-            'sent': cfg.COLOR_SENT,        # Blue for sent messages
-            'received': cfg.COLOR_RECEIVED, # Gray for received
-            'bot': cfg.COLOR_BOT,          # Purple for bot
-            'system': cfg.COLOR_SYSTEM,     # Dark gray for system
-            'bg': '#ffffff',
-            'entry_bg': '#f8f9fa'
-        }
-        
-        # Font configurations
-        self.fonts = {
-            'message': ('Arial', 10),
-            'system': ('Arial', 9, 'italic'),
-            'entry': ('Arial', 11)
-        }
-    
-    def _setup_ui(self):
-        """Build the complete GUI interface."""
-        # Main container
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # === 1. Connection Status Bar ===
-        status_frame = ttk.Frame(main_frame)
-        status_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        self.status_indicator = tk.Label(
-            status_frame, text="●", font=('Arial', 12),
-            foreground='gray'
-        )
-        self.status_indicator.pack(side=tk.LEFT)
-        
-        self.status_label = ttk.Label(status_frame, text="Connecting...")
-        self.status_label.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # Bot status
-        self.bot_status_label = ttk.Label(
-            status_frame, text="🤖 Bot: Active", 
-            foreground=cfg.COLOR_BOT
-        )
-        self.bot_status_label.pack(side=tk.RIGHT)
-        
-        # === 2. Chat Display Area (Core Feature) ===
-        chat_frame = ttk.LabelFrame(main_frame, text="Chat History", padding="5")
-        chat_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        self.chat_display = scrolledtext.ScrolledText(
-            chat_frame,
-            state='disabled',
-            wrap='word',
-            font=self.fonts['message'],
-            bg=self.colors['bg']
-        )
-        self.chat_display.pack(fill=tk.BOTH, expand=True)
-        
-        # Configure tags for different message types
-        # ✅ Bidirectional message display configuration
-        self.chat_display.tag_config('sent', justify='right', foreground=self.colors['sent'])
-        self.chat_display.tag_config('received', justify='left', foreground=self.colors['received'])
-        self.chat_display.tag_config('bot', justify='left', foreground=self.colors['bot'], font=('Arial', 10, 'italic'))
-        self.chat_display.tag_config('system', justify='center', foreground=self.colors['system'], font=self.fonts['system'])
-        self.chat_display.tag_config('emoji', justify='left', font=('Arial', 12))
-        
-        # === 3. Input Area ===
-        input_frame = ttk.Frame(main_frame)
-        input_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        self.message_entry = ttk.Entry(
-            input_frame,
-            font=self.fonts['entry']
-        )
-        self.message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
-        self.message_entry.bind('<Return>', lambda e: self._send_message())
-        
-        send_btn = tk.Button(
-            input_frame,
-            text="Send 📤",
-            command=self._send_message,
-            bg='#007acc',
-            fg='white',
-            relief='flat',
-            padx=15,
-            pady=5
-        )
-        send_btn.pack(side=tk.RIGHT)
-        
-        # === 4. Emoji Quick Insert (Bonus Feature) ===
-        emoji_frame = ttk.Frame(main_frame)
-        emoji_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(emoji_frame, text="Quick Emojis:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        emojis = ["😊", "👍", "🎉", "🤔", "❓", "✨", "👋", "❤️"]
-        for emoji in emojis:
-            btn = tk.Button(
-                emoji_frame,
-                text=emoji,
-                width=2,
-                command=lambda e=emoji: self._insert_emoji(e),
-                relief='flat',
-                font=('Arial', 12)
-            )
-            btn.pack(side=tk.LEFT, padx=2)
-        
-        # === 5. Control Buttons ===
-        control_frame = ttk.Frame(main_frame)
-        control_frame.pack(fill=tk.X)
-        
-        # User list button
-        users_btn = tk.Button(
-            control_frame,
-            text="👥 Users",
-            command=self._show_users,
-            relief='flat',
-            padx=10
-        )
-        users_btn.pack(side=tk.LEFT, padx=(0, 5))
-        
-        # Bot persona selector
-        ttk.Label(control_frame, text="Bot Persona:").pack(side=tk.LEFT, padx=(15, 5))
-        
-        self.persona_var = tk.StringVar(value=self.persona)
-        persona_combo = ttk.Combobox(
-            control_frame,
-            textvariable=self.persona_var,
-            values=["helpful", "humorous", "serious", "creative", "advisor"],
-            width=12,
-            state='readonly'
-        )
-        persona_combo.pack(side=tk.LEFT)
-        persona_combo.bind('<<ComboboxSelected>>', self._change_persona)
-        
-        # Toggle bot button
-        self.bot_toggle_btn = tk.Button(
-            control_frame,
-            text="🤖 Bot: ON",
-            command=self._toggle_bot,
-            relief='flat',
-            padx=10,
-            bg='#e8f5e9'
-        )
-        self.bot_toggle_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        
-        # Help button
-        help_btn = tk.Button(
-            control_frame,
-            text="❓ Help",
-            command=self._show_help,
-            relief='flat',
-            padx=10
-        )
-        help_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        
-        # Exit button
-        exit_btn = tk.Button(
-            control_frame,
-            text="🚪 Exit",
-            command=self._on_close,
-            relief='flat',
-            padx=10,
-            bg='#ffebee'
-        )
-        exit_btn.pack(side=tk.RIGHT)
-    
-    def _connect_to_server(self):
-        """Initialize connection to chat server."""
-        self.client = ChatClient(self.username)
-        self.client.on_connected = self._on_connected
-        self.client.on_disconnected = self._on_disconnected
-        self.client.on_message_received = self._on_message_received
-        
-        if self.client.connect():
-            if self.client.login():
-                self._display_system("Connected to server!")
-            else:
-                self._display_system("Login failed. Username may be taken.")
-        else:
-            self._display_system("Failed to connect to server. Make sure server is running.")
-    
-    def _on_connected(self):
-        """Callback when connected to server."""
-        self.connected = True
-        self.status_indicator.config(foreground='green')
-        self.status_label.config(text=f"Connected as {self.username}")
-        
-        # Initialize bot
-        reset_bot()  # Reset any existing bot
-        self.bot = get_bot(persona=self.persona)
-        
-        self._display_system(f"Welcome, {self.username}! Type /help for commands.")
-    
-    def _on_disconnected(self):
-        """Callback when disconnected from server."""
-        self.connected = False
-        self.status_indicator.config(foreground='red')
-        self.status_label.config(text="Disconnected")
-        self._display_system("Disconnected from server.")
-    
-    def _on_message_received(self, msg_data: dict):
-        """
-        Callback when message received from server.
-        Runs in background thread - must queue to main thread.
-        """
-        # Queue the message for main thread processing
-        self.gui_queue.put(msg_data)
-    
-    def _start_gui_update_loop(self):
-        """Start periodic GUI update loop (runs in main thread)."""
-        self._process_gui_queue()
-    
-    def _process_gui_queue(self):
-        """
-        Process queued messages from network thread.
-        ✅ This ensures all GUI updates happen in main thread.
-        """
+        self.root.title(f"XChat — {username}")
+        self.root.geometry("900x680")
+        self.root.minsize(700, 480)
+        self.root.configure(bg=T["bg"])
+
+        self._build_ui()
+        self._start_server()
+        self._connect()
+        self._poll()
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
+
+    # ── Server ──────────────────────────────────────────
+    def _start_server(self):
+        """Start local server only in Host mode."""
+        if self.mode != "host":
+            self._sysmsg(f"🔗 Joining {self.host}:{self.port}...")
+            return
+
+        if self._server_alive(self.host, self.port):
+            return
+
+        self._sysmsg("⏳ Starting server...")
         try:
-            while True:
-                msg_data = self.gui_queue.get_nowait()
-                self._handle_received_message(msg_data)
-        except queue.Empty:
-            pass
-        
-        # Schedule next check
-        self.root.after(100, self._process_gui_queue)
-    
-    def _handle_received_message(self, msg_data: dict):
-        """Process a received message (in main thread)."""
-        action = msg_data.get('action', '')
-        
-        if action == 'exchange':
-            sender = msg_data.get('from', 'Unknown')
-            content = msg_data.get('message', '')
-            
-            # Skip own messages (already displayed when sent)
-            if sender == self.username:
-                return
-            
-            # Store in history for summary
-            self.chat_history.append(f"{sender}: {content}")
+            # Set config to match before starting server
+            cfg.CHAT_IP = self.host
+            cfg.CHAT_PORT = self.port
+            cfg.SERVER = (self.host, self.port)
 
-            # Treat bot-formatted messages as bot output for all clients.
-            # This keeps the bot bubble style while still using normal server broadcast.
-            if content.startswith("🤖 Bot:"):
-                self._display_message(f"{sender} {content}", tag='bot')
-                return
-            
-            # Analyze sentiment and display with emoji
-            sentiment = self.sentiment_analyzer.analyze(content)
-            self._display_message(
-                f"{sender}: {content}",
-                tag='received',
-                emoji=sentiment['emoji']
-            )
-        
-        elif action == 'login':
-            status = msg_data.get('status', '')
-            if status == 'ok':
-                pass  # Already handled
-            elif status == 'duplicate':
-                self._display_system("Login failed: Username already taken")
-        
-        elif action == 'list':
-            results = msg_data.get('results', '')
-            self._display_system(f"Online Users:\n{results}")
-        
-        elif action == 'time':
-            result = msg_data.get('results', '')
-            self._display_system(f"Server Time: {result}")
-        
-        elif action == 'search':
-            results = msg_data.get('results', '')
-            self._display_system(f"Search Results:\n{results}")
-        
-        elif action == 'connect':
-            status = msg_data.get('status', '')
-            from_user = msg_data.get('from', '')
-            if status == 'request':
-                self._display_system(f"Connection request from {from_user}")
-            elif status == 'success':
-                self._display_system(f"Connected with {from_user}")
-        
-        elif action == 'bot_response':
-            response = msg_data.get('content', '')
-            original_sender = msg_data.get('original_sender', '')
-            if original_sender:
-                self._display_message(f"🤖 Bot: {response}", tag='bot')
-            else:
-                self._display_message(f"🤖 Bot: {response}", tag='bot')
-        
-        elif action == 'disconnect':
-            self._display_system("Peer disconnected")
-    
-    def _should_bot_respond(self, content: str, sender: str) -> bool:
-        """
-        Check if bot should respond to this message.
-        ✅ Group chat feature: Only respond to @Bot or keywords.
-        """
-        if sender == "Bot":  # Don't respond to other bots
+            from server.chat_server import Server
+            def _run():
+                srv = Server()
+                srv.run()
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+
+            for _ in range(30):
+                time.sleep(0.1)
+                if self._server_alive(self.host, self.port):
+                    self._sysmsg(f"✅ Server ready on {self.host}:{self.port}")
+                    return
+            self._sysmsg("⚠️  Server starting slowly...")
+        except Exception as e:
+            self._sysmsg(f"❌ Server start failed: {e}")
+
+    def _server_alive(self, host=None, port=None):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.3)
+            ok = s.connect_ex((host or cfg.CHAT_IP, port or cfg.CHAT_PORT)) == 0
+            s.close()
+            return ok
+        except:
             return False
-        
-        content_lower = content.lower()
-        
-        # Check for @Bot mention
-        if '@bot' in content_lower or '@Bot' in content:
-            return True
-        
-        # Check for specific keywords (avoid spam)
-        trigger_keywords = ['help', 'bot', 'ai', 'question', 'please']
-        if any(keyword in content_lower for keyword in trigger_keywords):
-            return True
-        
-        return False
-    
-    def _schedule_bot_response(self, user_content: str, sender: str):
-        """Schedule bot response to avoid blocking GUI."""
-        def respond():
-            # Generate response
-            response = self.bot.chat(user_content)
-            
-            # Add bot response to history
-            bot_entry = f"🤖 Bot: {response}"
-            self.chat_history.append(bot_entry)
 
-            # Broadcast bot response through server so every client can see it.
-            if self.connected and self.client:
-                self.client.send_message(bot_entry, broadcast=True)
-            
-            # Queue display in main thread
-            self.gui_queue.put({
-                'action': 'bot_response',
-                'content': response,
-                'original_sender': sender,
-                'original_content': user_content
-            })
-        
-        # Run in background thread
-        thread = threading.Thread(target=respond, daemon=True)
-        thread.start()
-    
-    def _display_message(self, text: str, tag: str = 'received', emoji: str = ''):
-        """
-        Display a message in the chat window.
-        ✅ Thread-safe: Must be called from main thread.
-        """
-        def _insert():
-            self.chat_display.config(state='normal')
-            
-            # Add emoji prefix if provided
-            if emoji:
-                full_text = f"{emoji} {text}\n"
+    # ── UI ──────────────────────────────────────────────
+    def _build_ui(self):
+        # Top bar
+        tb = tk.Frame(self.root, bg=T["topbar"], height=44)
+        tb.pack(fill="x"); tb.pack_propagate(False)
+
+        tk.Label(tb, text="💬  XChat", font=("Segoe UI", 12, "bold"),
+                 fg=T["white"], bg=T["topbar"]).pack(side="left", padx=14, pady=8)
+
+        self._dot = tk.Label(tb, text="●", font=("Segoe UI", 9), fg=T["yellow"], bg=T["topbar"])
+        self._dot.pack(side="left")
+
+        self._st = tk.Label(tb, text=" Connecting...", font=("Segoe UI", 9),
+                            fg=T["muted"], bg=T["topbar"])
+        self._st.pack(side="left", padx=(2, 0))
+
+        self._bstat = tk.Label(tb, text="🤖 Bot: OFF", font=("Segoe UI", 9),
+                               fg=T["muted"], bg=T["topbar"])
+        self._bstat.pack(side="right", padx=(0, 8), pady=10)
+
+        tk.Button(tb, text="⚙", font=("Segoe UI", 13), bg=T["topbar"], fg=T["muted"],
+                  relief="flat", bd=0, activebackground=T["topbar"],
+                  command=self._settings).pack(side="right", padx=(0, 2), pady=6)
+
+        # Main area: sidebar + chat
+        body = tk.Frame(self.root, bg=T["bg"])
+        body.pack(fill="both", expand=True)
+
+        # Sidebar
+        sb = tk.Frame(body, bg=T["sidebar"], width=180)
+        sb.pack(side="left", fill="y"); sb.pack_propagate(False)
+
+        tk.Label(sb, text="ONLINE", font=("Segoe UI", 8, "bold"),
+                 fg=T["muted"], bg=T["sidebar"]).pack(anchor="w", padx=12, pady=(14, 6))
+        self._ulist = tk.Text(sb, font=("Segoe UI", 10), bg=T["sidebar"], fg=T["text"],
+                              relief="flat", bd=0, padx=12, pady=4, state="disabled",
+                              cursor="arrow", height=20)
+        self._ulist.pack(fill="both", expand=True)
+
+        tk.Label(sb, text="", font=("Segoe UI", 8), fg=T["muted"], bg=T["sidebar"]).pack(pady=(0, 4))
+
+        # Chat area
+        cr = tk.Frame(body, bg=T["chat_bg"])
+        cr.pack(side="left", fill="both", expand=True)
+
+        self._chat = tk.Text(cr, state="disabled", wrap="word", font=("Segoe UI", 10),
+                             bg=T["chat_bg"], fg=T["text"], relief="flat", bd=0,
+                             padx=14, pady=10, selectbackground=T["accent"], cursor="arrow")
+        self._chat.pack(fill="both", expand=True)
+
+        # Tags
+        self._chat.tag_config("me", foreground=T["white"], background=T["bubble_me"],
+                               lmargin1=100, lmargin2=100, rmargin=16,
+                               spacing1=6, spacing3=6, font=("Segoe UI", 10), wrap="word")
+        self._chat.tag_config("you", foreground=T["text"], background=T["bubble_you"],
+                               lmargin1=16, lmargin2=16, rmargin=100,
+                               spacing1=6, spacing3=6, font=("Segoe UI", 10), wrap="word")
+        self._chat.tag_config("bot", foreground=T["white"], background=T["bubble_bot"],
+                               lmargin1=16, lmargin2=16, rmargin=100,
+                               spacing1=6, spacing3=6, font=("Segoe UI", 10, "italic"), wrap="word")
+        self._chat.tag_config("sys", foreground=T["muted"], justify="center",
+                               spacing1=4, spacing3=4, font=("Segoe UI", 8))
+
+        # Bottom bar
+        bb = tk.Frame(self.root, bg=T["input_bg"], padx=12, pady=8)
+        bb.pack(fill="x")
+
+        for em in ["😊","👍","🎉","🤔","❤️","👋","🔥","💡"]:
+            tk.Button(bb, text=em, width=2, font=("Segoe UI", 13), bg=T["input_bg"],
+                      fg=T["text"], relief="flat", bd=0, activebackground=T["sidebar"],
+                      command=lambda e=em: self._emoji(e)).pack(side="left", padx=1)
+
+        self._entry = tk.Entry(bb, font=("Segoe UI", 11), bg=T["chat_bg"], fg=T["text"],
+                                insertbackground=T["text"], relief="flat", bd=8)
+        self._entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        self._entry.bind("<Return>", lambda e: self._send())
+        self._entry.focus_set()
+
+        tk.Button(bb, text="Send  ➤", font=("Segoe UI", 10, "bold"), bg=T["accent"],
+                  fg=T["white"], relief="flat", padx=18, pady=7,
+                  activebackground=T["accent_hov"], command=self._send).pack(side="right", padx=(6, 0))
+
+    # ── Connection ──────────────────────────────────────
+    def _connect(self):
+        self.client = ChatClient(self.username, host=self.host, port=self.port)
+        self.client.on_connected = self._on_conn
+        self.client.on_disconnected = self._on_disc
+        self.client.on_message_received = self._on_msg
+        if self.client.connect() and self.client.login():
+            pass
+        else:
+            self._sysmsg(f"❌ Cannot reach {self.host}:{self.port}. Is the host running?")
+
+    def _on_conn(self):
+        self.connected = True
+        self._dot.config(fg=T["green"])
+        mode_label = "🏠 Host" if self.mode == "host" else f"🔗 {self.host}"
+        self._st.config(text=f" {self.username}  |  {mode_label}")
+        reset_bot(); self.bot = get_bot(persona=self.persona)
+        self._update_bot()
+        self._sysmsg(f"👋 Welcome, {self.username}! ({mode_label})")
+
+    def _on_disc(self):
+        self.connected = False
+        self._dot.config(fg=T["red"])
+        self._st.config(text=" Disconnected")
+
+    def _update_bot(self):
+        if self.bot and self.bot.siliconflow_available:
+            self._bstat.config(text="🤖 Bot: ON", fg=T["green"])
+        elif self.bot and self.bot.ollama_available:
+            self._bstat.config(text="🤖 Bot: Local", fg=T["yellow"])
+        else:
+            self._bstat.config(text="🤖 Bot: OFF", fg=T["muted"])
+
+    # ── Messages ────────────────────────────────────────
+    def _on_msg(self, d): self.gui_queue.put(d)
+
+    def _poll(self):
+        try:
+            while True: self._handle(self.gui_queue.get_nowait())
+        except queue.Empty: pass
+        self.root.after(100, self._poll)
+
+    def _handle(self, d):
+        a = d.get("action","")
+        if a == "exchange":
+            s, c = d.get("from",""), d.get("message","")
+            if s == self.username: return
+            self.chat_history.append(f"{s}: {c}")
+            if c.startswith("🤖 Bot:"):
+                self._show(f"{s} {c}", "bot")
             else:
-                full_text = f"{text}\n"
-            
-            self.chat_display.insert(tk.END, full_text, tag)
-            self.chat_display.config(state='disabled')
-            self.chat_display.see(tk.END)  # Auto-scroll to bottom
-        
-        # Ensure execution in main thread
-        if threading.current_thread() is threading.main_thread():
-            _insert()
-        else:
-            self.root.after(0, _insert)
-    
-    def _display_system(self, text: str):
-        """Display system message (centered, gray)."""
-        # ✅ BUG FIX: Explicitly clear system_msg before and after display
-        # This fixes the known bug where messages repeat
-        self.system_msg = ""
-        
-        def _insert():
-            self.chat_display.config(state='normal')
-            self.chat_display.insert(tk.END, f"\n{text}\n", 'system')
-            self.chat_display.config(state='disabled')
-            self.chat_display.see(tk.END)
-            
-            # ✅ BUG FIX: Reset system_msg after display
-            # This is the critical fix for the repeat message bug
-            self.system_msg = ""
-        
-        if threading.current_thread() is threading.main_thread():
-            _insert()
-        else:
-            self.root.after(0, _insert)
-    
-    def _insert_emoji(self, emoji: str):
-        """Insert emoji at cursor position in input field."""
-        self.message_entry.insert(tk.INSERT, emoji + " ")
-        self.message_entry.focus_set()
-    
-    def _send_message(self):
-        """Send message to server."""
-        content = self.message_entry.get().strip()
-        
-        if not content:
-            return
-        
-        # Clear input
-        self.message_entry.delete(0, tk.END)
-        
-        # Check for special commands
-        if content.startswith('/'):
-            self._handle_command(content)
-            return
-        
-        # Send to server
+                em = self.analyzer.analyze(c)["emoji"]
+                self._show(f"{s}: {c}", "you", em)
+        elif a == "bot_response":
+            self._show(f"🤖 Bot: {d.get('content','')}", "bot")
+        elif a in ("list","time","search"):
+            r = d.get("results","")
+            self._sysmsg({"list":"👥 Online","time":"🕐 Time","search":"🔍"}.get(a,"")+f"\n{r}")
+
+    def _send(self):
+        c = self._entry.get().strip()
+        if not c: return
+        self._entry.delete(0, "end")
+        if c.startswith("/"):
+            self._cmd(c); return
         if self.connected and self.client:
-            self.client.send_message(content, broadcast=True)
-        
-        # ✅ Display own message (right-aligned, blue)
-        self._display_message(f"{self.username}: {content}", tag='sent')
-        
-        # Store in history
-        self.chat_history.append(f"{self.username}: {content}")
+            self.client.send_message(c, broadcast=True)
+        self._show(f"{self.username}: {c}", "me")
+        self.chat_history.append(f"{self.username}: {c}")
+        if self.bot and self._should_bot(c):
+            self._bot_reply(c)
 
-        # Trigger local bot response for the sender's own @Bot mentions/keywords
-        if self.bot_enabled and self._should_bot_respond(content, self.username):
-            self._schedule_bot_response(content, self.username)
-    
-    def _handle_command(self, command: str):
-        """Handle special commands."""
-        # Extract command name (handle both /cmd arg and /cmd: arg formats)
-        cmd = command.lower().split()[0].rstrip(':')
-        
-        if cmd == '/help':
-            self._show_help()
-        
-        elif cmd == '/summary':
-            self._generate_summary()
-        
-        elif cmd == '/aipic':
-            # AI image generation command
+    def _should_bot(self, c):
+        return c.lower().startswith("@bot") or "@bot" in c.lower()
+
+    def _bot_reply(self, uc):
+        def r():
+            resp = self.bot.chat(uc)
+            be = f"🤖 Bot: {resp}"
+            self.chat_history.append(be)
+            if self.connected and self.client:
+                self.client.send_message(be, broadcast=True)
+            self.gui_queue.put({"action":"bot_response","content":resp})
+        threading.Thread(target=r, daemon=True).start()
+
+    def _cmd(self, c):
+        cmd = c.lower().split()[0].rstrip(":")
+        if cmd == "/help":
+            messagebox.showinfo("XChat Help",
+                "Commands:\n"
+                "  /users   — List online users\n"
+                "  /time    — Server time\n"
+                "  /clear   — Clear chat\n"
+                "  /summary — AI summary\n"
+                "  /aipic   — Generate image\n"
+                "  /persona — Change bot style\n"
+                "  /settings— API key\n"
+                "  @Bot ... — Talk to AI")
+        elif cmd == "/summary":
+            if self.chat_history:
+                g = SummaryGenerator(llm_client=self.bot)
+                self._sysmsg(g.generate(self.chat_history))
+            else:
+                self._sysmsg("No chat history yet.")
+        elif cmd == "/aipic":
             if self.bot:
-                response = self.bot.chat(command)
-                self._display_message(f"🤖 Bot: {response}", tag='bot')
-                self.chat_history.append(f"🤖 Bot: {response}")
-        
-        elif cmd == '/persona':
-            parts = command.split(maxsplit=1)
-            if len(parts) > 1:
-                new_persona = parts[1].lower()
-                if self.bot and self.bot.set_persona(new_persona):
-                    self.persona_var.set(new_persona)
-                    self._display_system(f"Bot persona changed to: {new_persona}")
-                else:
-                    self._display_system(f"Unknown persona: {new_persona}")
-        
-        elif cmd == '/clear':
-            self.chat_display.config(state='normal')
-            self.chat_display.delete('1.0', tk.END)
-            self.chat_display.config(state='disabled')
-            self._display_system("Chat cleared.")
-        
-        elif cmd == '/users':
-            if self.client:
-                self.client.list_users()
-        
-        elif cmd == '/time':
-            if self.client:
-                self.client.get_time()
-        
-        elif cmd == '/quit' or cmd == '/exit':
-            self._on_close()
-        
+                r = self.bot.chat(c); self._show(f"🤖 Bot: {r}", "bot")
+                self.chat_history.append(f"🤖 Bot: {r}")
+        elif cmd == "/persona":
+            p = c.split(maxsplit=1)
+            if len(p)>1 and self.bot and self.bot.set_persona(p[1].lower()):
+                self._sysmsg(f"🎭 Persona → {p[1].lower()}")
+        elif cmd == "/clear":
+            self._chat.config(state="normal"); self._chat.delete("1.0","end")
+            self._chat.config(state="disabled"); self._sysmsg("🧹 Cleared")
+        elif cmd == "/settings": self._settings()
+        elif cmd == "/users":
+            if self.client: self.client.list_users()
+        elif cmd == "/time":
+            if self.client: self.client.get_time()
+        elif cmd in ("/quit","/exit"): self._close()
+        else: self._sysmsg(f"❓ Unknown: {cmd}")
+
+    def _settings(self):
+        APISettingsDialog(self.root)
+        self.root.after(500, self._reinit_bot)
+
+    def _reinit_bot(self):
+        reset_bot(); self.bot = get_bot(persona=self.persona)
+        self._update_bot()
+        if self.bot.siliconflow_available:
+            self._sysmsg("🤖 Bot now powered by SiliconFlow!")
+        elif self.bot.ollama_available:
+            self._sysmsg("🤖 Bot using local Ollama.")
         else:
-            self._display_system(f"Unknown command: {cmd}. Type /help for available commands.")
-    
-    def _generate_summary(self):
-        """Generate summary of recent chat history."""
-        if not self.chat_history:
-            self._display_system("No chat history to summarize.")
-            return
-        
-        generator = SummaryGenerator(llm_client=self.bot if self.bot.ollama_available else None)
-        summary = generator.generate(self.chat_history)
-        
-        self._display_system(summary)
-    
-    def _show_users(self):
-        """Show list of online users."""
-        if self.client:
-            self.client.list_users()
-    
-    def _change_persona(self, event=None):
-        """Change bot persona based on selection."""
-        new_persona = self.persona_var.get()
-        if self.bot:
-            self.bot.set_persona(new_persona)
-            self._display_system(f"Bot persona changed to: {new_persona}")
-    
-    def _toggle_bot(self):
-        """Toggle bot on/off."""
-        self.bot_enabled = not self.bot_enabled
-        
-        if self.bot_enabled:
-            self.bot_toggle_btn.config(text="🤖 Bot: ON", bg='#e8f5e9')
-            self.bot_status_label.config(text="🤖 Bot: Active")
-            self._display_system("Bot enabled. Mention @Bot to interact.")
-        else:
-            self.bot_toggle_btn.config(text="🤖 Bot: OFF", bg='#ffebee')
-            self.bot_status_label.config(text="🤖 Bot: Inactive")
-            self._display_system("Bot disabled.")
-    
-    def _show_help(self):
-        """Show help dialog."""
-        help_text = """
-ICDS Chat Commands:
+            self._sysmsg("ℹ️  Set API key in Settings to enable Bot.")
 
-Basic:
-  /help - Show this help
-  /users - List online users
-  /time - Show server time
-  /clear - Clear chat display
-  /quit - Exit application
+    # ── Display ─────────────────────────────────────────
+    def _show(self, text, tag, emoji=""):
+        def ins():
+            self._chat.config(state="normal")
+            pfx = f"{emoji} " if emoji else ""
+            self._chat.insert("end", f"{pfx}{text}\n", tag)
+            self._chat.config(state="disabled"); self._chat.see("end")
+        if threading.current_thread() is threading.main_thread(): ins()
+        else: self.root.after(0, ins)
 
-AI Bot Features:
-  @Bot <message> - Chat with AI bot
-  /persona <name> - Change bot persona
-  /summary - Summarize recent chat
-  /aipic: <desc> - Generate AI image
+    def _sysmsg(self, text):
+        def ins():
+            self._chat.config(state="normal")
+            self._chat.insert("end", f"  {text}\n", "sys")
+            self._chat.config(state="disabled"); self._chat.see("end")
+        if threading.current_thread() is threading.main_thread(): ins()
+        else: self.root.after(0, ins)
 
-Bot Personas:
-  helpful, humorous, serious, creative, advisor
+    def _emoji(self, e):
+        self._entry.insert("insert", e+" "); self._entry.focus_set()
 
-Tips:
-  • Use emoji buttons for quick insertion
-  • Bot only responds to @Bot mentions
-  • Sentiment analysis shows emoji indicators
-"""
-        messagebox.showinfo("Help", help_text)
-    
-    def _on_close(self):
-        """Handle application close."""
-        if self.client:
-            self.client.disconnect()
-        
+    def _close(self):
+        if self.client: self.client.disconnect()
         self.root.destroy()
-    
-    def run(self):
-        """Start the GUI application."""
-        self.root.mainloop()
+
+    def run(self): self.root.mainloop()
 
 
 def main():
-    """Main entry point."""
-    # Check for display only on Linux/Unix systems
-    if sys.platform.startswith('linux'):
-        if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
-            print('[ERROR] No graphical display available. GUI client requires X11/Wayland.')
-            print('Set $DISPLAY or $WAYLAND_DISPLAY, or use a terminal-based client instead.')
-            return
-
-    try:
-        print("[INFO] 启动 GUI 客户端...")
-        sys.stdout.flush()
-        print("[INFO] 创建登录对话框...")
-        sys.stdout.flush()
-        
-        # Show login dialog
-        print("[INFO] 等待用户登录...")
-        sys.stdout.flush()
-        username, persona = show_login_dialog(None)
-        
-        if username:
-            print(f"[INFO] 用户登录: {username}, 角色: {persona}")
-            sys.stdout.flush()
-            
-            # Start main application
-            app = GUIChatClient(username=username, persona=persona)
-            app.run()
-        else:
-            print("登录已取消")
-            sys.stdout.flush()
-    
-    except Exception as e:
-        print(f"[ERROR] 程序崩溃: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.stdout.flush()
+    if sys.platform.startswith("linux"):
+        if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+            print("[ERROR] No display available."); return
+    u, p, mode, ip, port = show_login_dialog(None)
+    if u:
+        try: port = int(port)
+        except: port = 1112
+        XChatClient(username=u, persona=p, mode=mode, host=ip, port=port).run()
 
 
 if __name__ == "__main__":

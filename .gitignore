@@ -5,8 +5,17 @@
 __pycache__/
 *.pyc
 
+# PyInstaller build artifacts
+build/
+dist/
+*.exe
+
 # Generated image outputs
 generated_images/
 
 # Index/cache files
 *.idx
+
+# OS junk
+.DS_Store
+Thumbs.db

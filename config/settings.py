@@ -20,13 +20,15 @@ BOT_NAME = "Bot"
 BOT_TRIGGER_KEYWORDS = ["@Bot", "@bot", "BOT", "bot"]
 DEFAULT_BOT_PERSONA = "helpful"
 
-# Ollama API settings
+# Ollama API settings (local fallback)
 OLLAMA_HOST = "http://localhost:11434"
 OLLAMA_MODEL = "phi3:mini"
 
-# OpenAI-compatible API fallback
-OPENAI_API_KEY = "EMPTY"
-OPENAI_BASE_URL = "http://localhost:11434/v1"
+# SiliconFlow API settings (primary AI provider)
+# These are also loaded from .env via python-dotenv
+SILICONFLOW_API_KEY = "EMPTY"
+SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
+SILICONFLOW_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 # Menu options
 MENU = """

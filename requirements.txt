@@ -12,9 +12,10 @@
 # select
 # json
 
-# AI/ML Features (optional but recommended)
-textblob>=0.17.1        # Sentiment analysis
-requests>=2.28.0        # HTTP requests for Ollama API
+# AI/ML Features (required)
+openai>=1.0.0            # OpenAI-compatible API client (SiliconFlow, etc.)
+textblob>=0.17.1         # Sentiment analysis
+requests>=2.28.0         # HTTP requests for Ollama API
 
 # Environment variables from .env
 python-dotenv>=1.0.0
